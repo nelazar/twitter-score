@@ -27,9 +27,9 @@ def connect_to_endpoint(url:str, params:dict) -> dict | list:
     response = requests.request("GET", url, auth=bearer_oauth, params=params)
     print(response.status_code)
     if response.status_code == 429:
-        sleep_time = datetime.datetime.now() + datetime.timedelta(seconds=900)
+        sleep_time = datetime.datetime.now() + datetime.timedelta(seconds=902)
         print(f"Pausing for rate limit until {sleep_time.strftime('%H:%M:%S')}")
-        time.sleep(900)
+        time.sleep(902)
         return connect_to_endpoint(url, params)
     elif response.status_code != 200:
         raise Exception(f"Request returned an error: {response.status_code} {response.text}")
