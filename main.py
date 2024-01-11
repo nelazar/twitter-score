@@ -171,8 +171,8 @@ def setup_db() -> None:
 
 def main() -> None:
 
-    setup = True
-    pull_data = False
+    setup = False
+    pull_data = True
 
     if setup:
         setup_db()
