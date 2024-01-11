@@ -178,7 +178,7 @@ def main() -> None:
         setup_db()
 
     # Pull account data from yaml files
-    if pull_data:
+    if setup or pull_data:
         print("Pulling account data from yaml files")
         accounts = get_accounts('legislators-current.yaml', 'legislators-social-media.yaml')
 
