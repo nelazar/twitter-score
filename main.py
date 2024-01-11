@@ -209,29 +209,33 @@ def main() -> None:
             count += 1
             print(f"{count}/{total} - {member['name']}")
             res = cursor.execute(
-                """
-                SELECT DISTINCT complete
-                """
-            )
-
-            tweets = get_tweets(member['twitter_id'])
-            for tweet in tweets:
-                retweets = get_retweets(tweet)
-                for retweet in retweets:
-                    cursor.execute(
-                        """
-                        INSERT OR IGNORE INTO users (user, tweet, member) VALUES (?, ?, ?)
-                        """,
-                        (retweet, tweet, member['twitter_id'])
-                    )
-                    connection.commit()
-            cursor.execute(
                 f"""
-                UPDATE OR IGNORE members SET complete = TRUE
-                    WHERE member={member}
+                SELECT DISTINCT complete FROM members
+                    WHERE member={member['twitter_id']}
                 """
             )
-            connection.commit()
+            complete = res.fetchone()[0] == 1
+            if complete:
+                print(f"Already read tweets from {member['name']}")
+            else:
+                tweets = get_tweets(member['twitter_id'])
+                for tweet in tweets:
+                    retweets = get_retweets(tweet)
+                    for retweet in retweets:
+                        cursor.execute(
+                            """
+                            INSERT OR IGNORE INTO users (user, tweet, member) VALUES (?, ?, ?)
+                            """,
+                            (retweet, tweet, member['twitter_id'])
+                        )
+                        connection.commit()
+                cursor.execute(
+                    f"""
+                    UPDATE OR IGNORE members SET complete = TRUE
+                        WHERE member={member}
+                    """
+                )
+                connection.commit()
 
 
 if __name__ == '__main__':
