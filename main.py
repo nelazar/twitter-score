@@ -32,9 +32,17 @@ def connect_to_endpoint(url:str, params:dict) -> dict | list:
         time.sleep(902)
         return connect_to_endpoint(url, params)
     elif response.status_code != 200:
-        raise Exception(f"Request returned an error: {response.status_code} {response.text}")
+        log(f"Request returned an error: {response.status_code} {response.text}")
     else:
         return response.json()
+    
+
+# Send log message to file
+def log(message:str) -> None:
+
+    curr_time = datetime.datetime.now().strftime('%d/%m/%Y, %H:%M:%S')
+    with open('log.txt', 'a') as f:
+        print(f"{curr_time} - {message}", file=f)
     
 
 # Retrieve a list of Twitter accounts of congress members from the given files
@@ -67,7 +75,7 @@ def get_accounts(members:str, social_media:str) -> list[Account]:
 
 
 # Returns a list of tweet IDs (limited to 10 to avoid tweet cap) given a user ID
-def get_tweets(id:int, max_results:int=10) -> list[int]:
+def get_tweets(id:int, max_results:int=15) -> list[int]:
     url = f"https://api.twitter.com/2/users/{id}/tweets"
     params = {
         "tweet.fields": "id,created_at,referenced_tweets",
@@ -77,11 +85,20 @@ def get_tweets(id:int, max_results:int=10) -> list[int]:
     tweets = []
 
     response = connect_to_endpoint(url, params)
-    for tweet in response['data']:
-        if 'referenced_tweets' not in tweet:
-            tweets.append(int(tweet['id']))
-        elif tweet['referenced_tweets'][0]['type'] == 'quoted':
-            tweets.append(int(tweet['id']))
+    if 'data' in response:
+        for tweet in response['data']:
+            if 'referenced_tweets' not in tweet:
+                try:
+                    tweets.append(int(tweet['id']))
+                except:
+                    log(f"Failed to save tweet {tweet}")
+            elif tweet['referenced_tweets'][0]['type'] == 'quoted':
+                try:
+                    tweets.append(int(tweet['id']))
+                except:
+                    log(f"Failed to save tweet {tweet}")
+    else:
+        log(f"No tweets found from response: {response}")
 
     return tweets
 
@@ -108,8 +125,9 @@ def get_retweets(tweet_id:int) -> list[int]:
             }
 
         response = connect_to_endpoint(url, params)
-        for user in response['data']:
-            users.append(int(user['id']))
+        if 'data' in response:
+            for user in response['data']:
+                users.append(int(user['id']))
 
         if 'pagination_token' in response['meta']:
             pagination_token = response['meta'].keys()
@@ -132,7 +150,8 @@ def setup_db() -> None:
             member INTEGER PRIMARY KEY,
             bioguide TEXT,
             handle TEXT,
-            name TEXT
+            name TEXT,
+            complete INT
         )
         """
     )
@@ -152,8 +171,8 @@ def setup_db() -> None:
 
 def main() -> None:
 
-    setup = False
-    pull_data = True
+    setup = True
+    pull_data = False
 
     if setup:
         setup_db()
@@ -173,8 +192,8 @@ def main() -> None:
         print("Inserting account data into database")
         cursor.executemany(
             """
-            INSERT INTO members (member, bioguide, handle, name)
-                VALUES (:twitter_id, :id, :handle, :name)
+            INSERT INTO members (member, bioguide, handle, name, complete)
+                VALUES (:twitter_id, :id, :handle, :name, FALSE)
             """,
             accounts
         )
@@ -189,17 +208,30 @@ def main() -> None:
         for member in accounts:
             count += 1
             print(f"{count}/{total} - {member['name']}")
+            res = cursor.execute(
+                """
+                SELECT DISTINCT complete
+                """
+            )
+
             tweets = get_tweets(member['twitter_id'])
             for tweet in tweets:
                 retweets = get_retweets(tweet)
                 for retweet in retweets:
                     cursor.execute(
                         """
-                        INSERT INTO users (user, tweet, member) VALUES (?, ?, ?)
+                        INSERT OR IGNORE INTO users (user, tweet, member) VALUES (?, ?, ?)
                         """,
                         (retweet, tweet, member['twitter_id'])
                     )
                     connection.commit()
+            cursor.execute(
+                f"""
+                UPDATE OR IGNORE members SET complete = TRUE
+                    WHERE member={member}
+                """
+            )
+            connection.commit()
 
 
 if __name__ == '__main__':
