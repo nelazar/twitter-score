@@ -168,6 +168,8 @@ def setup_db() -> None:
         """
     )
 
+    connection.close()
+
 
 def main() -> None:
 
@@ -236,6 +238,8 @@ def main() -> None:
                     """
                 )
                 connection.commit()
+
+    connection.close()
 
 
 if __name__ == '__main__':
