@@ -1,4 +1,5 @@
 from typing import TypedDict
+from typing import Literal
 
 
 class Account(TypedDict):
@@ -6,3 +7,4 @@ class Account(TypedDict):
     name: str
     handle: str
     twitter_id: str
+    party: Literal['Democrat', 'Independent', 'Republican']

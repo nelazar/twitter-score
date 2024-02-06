@@ -57,6 +57,7 @@ def get_accounts(members:str, social_media:str) -> list[Account]:
         
         for legislator in legislators:
             id = legislator['id']['bioguide']
+            party = legislator['terms'][-1]['party']
             for account in socials:
                 if (account['id']['bioguide'] == id
                     and 'twitter_id' in account['social']):
@@ -68,7 +69,8 @@ def get_accounts(members:str, social_media:str) -> list[Account]:
                         'id': id,
                         'name': legislator['name']['official_full'],
                         'handle': handle,
-                        'twitter_id': account['social']['twitter_id']
+                        'twitter_id': account['social']['twitter_id'],
+                        'party': party
                     })
 
     return accounts
@@ -151,30 +153,31 @@ def setup_db() -> None:
             bioguide TEXT,
             handle TEXT,
             name TEXT,
+            party TEXT,
             complete INT
         )
         """
     )
 
     # Create table with users, the tweet they retweeted, and the member that tweet was from
-    cursor.execute(
-        """
-        CREATE TABLE users (
-            user INTEGER NOT NULL,
-            tweet INTEGER NOT NULL,
-            member INTEGER NOT NULL,
-            FOREIGN KEY (member) REFERENCES members (member)
-        )
-        """
-    )
+    # cursor.execute(
+    #     """
+    #     CREATE TABLE users (
+    #         user INTEGER NOT NULL,
+    #         tweet INTEGER NOT NULL,
+    #         member INTEGER NOT NULL,
+    #         FOREIGN KEY (member) REFERENCES members (member)
+    #     )
+    #     """
+    # )
 
     connection.close()
 
 
 def main() -> None:
 
-    setup = False
-    pull_data = True
+    setup = True
+    pull_data = False
 
     if setup:
         setup_db()
@@ -194,8 +197,8 @@ def main() -> None:
         print("Inserting account data into database")
         cursor.executemany(
             """
-            INSERT INTO members (member, bioguide, handle, name, complete)
-                VALUES (:twitter_id, :id, :handle, :name, FALSE)
+            INSERT INTO members (member, bioguide, handle, name, party, complete)
+                VALUES (:twitter_id, :id, :handle, :name, :party, FALSE)
             """,
             accounts
         )
