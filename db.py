@@ -142,7 +142,7 @@ def get_retweets(tweet_id:int) -> list[int]:
 # Setup database
 def setup_db() -> None:
 
-    connection = sqlite3.connect("twt-score.db")
+    connection = sqlite3.connect("data/twt-score.db")
     cursor = connection.cursor()
 
     # Create table with member information
@@ -185,11 +185,11 @@ def main() -> None:
     # Pull account data from yaml files
     if setup or pull_data:
         print("Pulling account data from yaml files")
-        accounts = get_accounts('legislators-current.yaml', 'legislators-social-media.yaml')
+        accounts = get_accounts('data/legislators-current.yaml', 'data/legislators-social-media.yaml')
 
     # Setup connection to database
     print("Establishing connection to database")
-    connection = sqlite3.connect("twt-score.db")
+    connection = sqlite3.connect("data/twt-score.db")
     cursor = connection.cursor()
 
     # Insert account data into database

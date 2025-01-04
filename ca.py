@@ -74,7 +74,7 @@ class CA(object):
         self.inertia = inertia
         self.eigenvals = np.diag(D_a)**2
 
-        self.norm_G = (self.G - np.mean(self.G, axis=0))/np.std(self.G, axis=0)
+        self.norm_G = (self.G - np.mean(self.G, axis=1)) / np.std(self.G, axis=1)
         self.norm_G[:,0] = 0 - self.norm_G[:,0]
 
     def plot(self):

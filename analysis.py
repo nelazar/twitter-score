@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 import yaml
 import matplotlib.pyplot as plt
+import sklearn.decomposition
+from plotnine import *
 
 import ca
 
@@ -13,7 +15,7 @@ import ca
 def get_data() -> pd.DataFrame:
     print("Pulling data from database")
 
-    connection = sqlite3.connect('twt-score.db')
+    connection = sqlite3.connect('data/twt-score.db')
     cursor = connection.cursor()
 
     users_response = cursor.execute(
@@ -32,9 +34,9 @@ def get_data() -> pd.DataFrame:
     bioguides = []
     names = []
     parties = []
-    with open('legislators-current.yaml', 'r') as legislators_file:
+    with open('data/legislators-current.yaml', 'r') as legislators_file:
         legislators = yaml.safe_load(legislators_file)
-    connection = sqlite3.connect('twt-score.db')
+    connection = sqlite3.connect('data/twt-score.db')
     cursor = connection.cursor()
     for member in members:
         members_response = cursor.execute(
@@ -61,14 +63,43 @@ def get_data() -> pd.DataFrame:
     return data
 
 
+def get_party_data() -> pd.DataFrame:
+    connection = sqlite3.connect('data/twt-score.db')
+    cursor = connection.cursor()
+    members_response = cursor.execute(
+        """
+        SELECT member, bioguide, name, party FROM members
+        """
+    )
+    members_result = members_response.fetchall()
+    members = list(map(lambda x: x[0], members_result))
+    bioguides = list(map(lambda x: x[1], members_result))
+    names = list(map(lambda x: x[2], members_result))
+    parties = list(map(lambda x: x[3], members_result))
+
+    data = pd.DataFrame(
+        {
+            "member": pd.Series(members),
+            "bioguide": pd.Series(bioguides),
+            "name": pd.Series(names),
+            "party": pd.Series(parties)
+        }
+    )
+
+    return data
+
+
 # Convert data to initial matrix (convert long to wide) with
 # columns representing each user and rows representing each tweet
-def initial_matrix(data: pd.DataFrame, writeto=None) -> pd.DataFrame:
+def initial_matrix(data: pd.DataFrame, drop=None, writeto=None) -> pd.DataFrame:
     print("Constructing initial matrix")
 
     data['values'] = 1
-    mat = data.pivot_table(index='tweet', columns='user', values='values', fill_value=0)
+    mat = data.pivot_table(index='member', columns='user', values='values', aggfunc='sum', fill_value=0)
     mat = mat.astype(int)
+
+    if drop is not None:
+        mat = mat.drop(index=drop)
 
     if writeto is not None:
         mat.to_csv(writeto)
@@ -113,47 +144,49 @@ def agreement_matrix(aff_mat: pd.DataFrame, writeto=None) -> pd.DataFrame:
     return agr_df
 
 
+# Calculate ideology measure using principal component analysis
+def PCA_measure(agr_mat: pd.DataFrame, writeto=None, varianceto=None) -> pd.DataFrame:
+    print("Generating ideology scores using PCA")
+
+    # Generate PCA
+    pca = sklearn.decomposition.PCA()
+    score = pca.fit_transform(agr_mat)
+
+    n_columns = 3
+    cols = [f"dim{i+1}" for i in range(n_columns)]
+
+    score_df = pd.DataFrame(score[:, :n_columns], columns=cols, index=agr_mat.index)
+    if writeto is not None:
+        score_df.to_csv(writeto)
+
+    variance_df = pd.DataFrame(pca.explained_variance_ratio_[:n_columns], index=cols, columns=['explained variance'])
+    if varianceto is not None:
+        variance_df.to_csv(varianceto)
+    return score_df
+
+
 # Calculate ideology measure using singular value decomposition
 def SVD_measure(agr_mat: pd.DataFrame, writeto=None) -> pd.DataFrame:
     print("Generating ideology scores using SVD decomposition")
 
     # Generate SVD
-    np_mat = agr_mat.to_numpy()
-    U, D_a, V = np.linalg.svd(np_mat, full_matrices=False)
+    P = agr_mat.to_numpy()
+    r = P.sum(axis=1)
+    c = P.sum(axis=0).T
+    # D_r_rsq = np.diag(1. / np.sqrt(r.A1))
+    # D_c_rsq = np.diag(1. / np.sqrt(c.A1))
+    U, D_a, V = np.linalg.svd(P, full_matrices=False)
     D_a = np.asmatrix(np.diag(D_a))
     V = V.T
 
-    # Plot first two dimensions
-    plt.figure(100)
-    data = get_data()
-    xmin, xmax = None, None
-    ymin, ymax = None, None
-    for i, tweet in enumerate(agr_mat.index):
-        tweet_data = data.loc[data['tweet'] == tweet]
-        x, y = U[i, 0], U[i, 1]
-        if tweet_data.loc[tweet_data.index[0], 'party'] == "Democrat":
-            party_color = "mediumblue"
-        elif tweet_data.loc[tweet_data.index[0], 'party'] == "Republican":
-            party_color = "indianred"
-        else:
-            party_color = "grey"
-        plt.text(x, y, tweet_data.loc[tweet_data.index[0], 'name'], va='center', ha='center', color=party_color)
-        xmin = min(x, xmin if xmin else x)
-        xmax = max(x, xmax if xmax else x)
-        ymin = min(y, ymin if ymin else y)
-        ymax = max(y, ymax if ymax else y)
+    F = U * D_a
+    G = V * D_a
 
-        if xmin and xmax:
-            pad = (xmax - xmin) * 0.1
-            plt.xlim(xmin - pad, xmax + pad)
-        if ymin and ymax:
-            pad = (ymax - ymin) * 0.1
-            plt.ylim(ymin - pad, ymax + pad)
-    
-    plt.grid()
-    plt.xlabel("Dim 1")
-    plt.ylabel("Dim 2")
-    plt.show()
+    eigenvals = np.diag(D_a)**2
+
+    cols = [f"dim{i+1}" for i in range(len(agr_mat.columns))]
+    score_df = pd.DataFrame(F, columns=cols, index=agr_mat.index)
+    return score_df
 
     # Save and return DataFrame
     scores_df = pd.DataFrame(U, columns=agr_mat.index)
@@ -163,29 +196,49 @@ def SVD_measure(agr_mat: pd.DataFrame, writeto=None) -> pd.DataFrame:
 
 
 def main() -> None:
-    if not os.path.exists('output/initial-matrix.csv'):
-        twt_data = get_data()
-        initial_mat = initial_matrix(twt_data, 'output/initial-matrix.csv')
-    elif not os.path.exists('output/affiliation-matrix.csv'):
-        initial_mat = pd.read_csv('output/initial-matrix.csv', index_col=0)
-        affiliation_mat = affiliation_matrix(initial_mat, 'output/affiliation-matrix.csv')
-    else: #if not os.path.exists('output/agreement-matrix.csv'):
-        affiliation_mat = pd.read_csv('output/affiliation-matrix.csv', index_col=0)
+    DROP = [817076257770835968, 2696643955, 339822881, 137823987, 29766367, 819744763020775425, 234469322,
+            2853793517, 14845376, 3026622545, 1081350574589833221, 854715071116849157, 1344375287484723205,
+            550401754, 2962868158]
 
-        tweet_corr_analysis = ca.CA(affiliation_mat)
-
-        plt.figure(100)
-        tweet_corr_analysis.plot()
-
-        plt.figure(101)
-        tweet_corr_analysis.norm_plot()
-
-        plt.show()
+    # if not os.path.exists('output/initial-matrix.csv'):
+    #     twt_data = get_data()
+    #     initial_mat = initial_matrix(twt_data, DROP, 'output/initial-matrix.csv')
+    # if not os.path.exists('output/affiliation-matrix.csv'):
+    #     initial_mat = pd.read_csv('output/initial-matrix.csv', index_col=0)
+    #     affiliation_mat = affiliation_matrix(initial_mat, 'output/affiliation-matrix.csv')
+    # if not os.path.exists('output/agreement-matrix.csv'):
+    #     affiliation_mat = pd.read_csv('output/affiliation-matrix.csv', index_col=0)
     #     agreement_mat = agreement_matrix(affiliation_mat, 'output/agreement-matrix.csv')
-    # elif not os.path.exists('output/svd-scores.csv'):
+    # else:
+    #     initial_mat = pd.read_csv('output/initial-matrix.csv', index_col=0)
+    #     affiliation_mat = pd.read_csv('output/affiliation-matrix.csv', index_col=0)
     #     agreement_mat = pd.read_csv('output/agreement-matrix.csv', index_col=0)
-    #     svd_scores = SVD_measure(agreement_mat, 'output/svd-scores.csv')
 
+    twt_data = get_data()
+    initial_mat = initial_matrix(twt_data, DROP, 'output/initial-matrix.csv')
+    affiliation_mat = affiliation_matrix(initial_mat, 'output/affiliation-matrix.csv')
+
+    # score = SVD_measure(agreement_mat)
+    # score['dim1'] = 1 - score['dim1']
+    # score_norm = (score-score.min())/(score.max()-score.min()) + 1
+    # score_norm = np.logaddexp()
+
+    CA = ca.CA(affiliation_mat)
+
+    dim1 = CA.norm_G[:,0]
+    dim1 = 1 - dim1 # Reverse values to match left-right ideological dimension
+    dim2 = CA.norm_G[:,1]
+    members = CA.rows
+    score_df = pd.DataFrame({"member": members, "dim1": dim1, "dim2": dim2})
+    party_data = get_party_data().set_index("member")
+    score_df = score_df.join(party_data, "member")
+    score_df.to_csv('output/score.csv', index=False)
+
+    eigenvals = CA.eigenvals
+    dims = np.arange(1, eigenvals.size + 1, 1)
+    perc_eigen = 100. * eigenvals / eigenvals.sum()
+    eigenval_data = pd.DataFrame({"Dimension": dims, "Eigenvalue": eigenvals, "Eigenvalue Percent": perc_eigen})
+    eigenval_data.to_csv('output/eigenvalues.csv', index=False)
 
 if __name__ == "__main__":
     main()
